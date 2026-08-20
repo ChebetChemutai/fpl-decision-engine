@@ -9,6 +9,13 @@ from fpl_engine.baseline.scoring import score_players
 from fpl_engine.domain.models import Player, Position, Squad
 from fpl_engine.domain.rules import BUDGET_M, validate_squad, validate_starting_xi
 
+# Captaining a goalkeeper is strategically weak even at equal expected
+# points: keepers have almost no route to a big score (no goal/assist
+# ceiling worth doubling), so a captain tie is never really a tie in
+# practice. Excluded from captaincy consideration entirely rather than
+# left to "highest score wins" — see conversation notes on the GW1 output.
+CAPTAIN_ELIGIBLE_POSITIONS = {Position.DEF, Position.MID, Position.FWD}
+
 
 def build_squad(players: list[Player], budget: float = BUDGET_M) -> Squad:
     """Run scoring -> squad optimization -> XI optimization -> captaincy.
@@ -40,7 +47,12 @@ def build_squad(players: list[Player], budget: float = BUDGET_M) -> Squad:
     bench_gk = [p for p in bench if p.position == Position.GKP]
     bench_ordered = bench_outfield + bench_gk
 
-    xi_by_score = sorted(starting_xi, key=lambda p: scores_by_id[p.id], reverse=True)
+    captain_pool = [p for p in starting_xi if p.position in CAPTAIN_ELIGIBLE_POSITIONS]
+    # Every legal starting XI has outfield players (min 3 DEF + 2 MID + 1 FWD),
+    # so this pool is never empty in practice — the fallback below is a
+    # defensive guard, not an expected path.
+    ranking_pool = captain_pool or starting_xi
+    xi_by_score = sorted(ranking_pool, key=lambda p: scores_by_id[p.id], reverse=True)
     captain, vice_captain = xi_by_score[0], xi_by_score[1]
 
     return Squad(

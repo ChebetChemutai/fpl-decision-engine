@@ -39,7 +39,15 @@ def test_captain_and_vice_are_distinct_starting_xi_members() -> None:
     assert squad.captain.id != squad.vice_captain.id
 
 
-def test_captain_has_highest_score_in_starting_xi() -> None:
+def test_captain_is_never_a_goalkeeper() -> None:
     squad = build_squad(synthetic_player_pool())
 
-    assert squad.captain.ep_next == max(p.ep_next for p in squad.starting_xi)
+    assert squad.captain.position != Position.GKP
+    assert squad.vice_captain.position != Position.GKP
+
+
+def test_captain_has_highest_score_among_outfield_starters() -> None:
+    squad = build_squad(synthetic_player_pool())
+
+    outfield_starters = [p for p in squad.starting_xi if p.position != Position.GKP]
+    assert squad.captain.ep_next == max(p.ep_next for p in outfield_starters)
