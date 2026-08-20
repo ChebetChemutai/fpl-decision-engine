@@ -23,7 +23,7 @@ class FplClient:
     — those are a Phase 3 (full data ingestion) concern, not Phase 1.5.
     """
 
-    def __init__(self, base_url: str = BASE_URL, timeout: float = 15.0) -> None:
+    def __init__(self, base_url: str = BASE_URL, timeout: float = 60.0) -> None:
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
 
     def fetch_bootstrap(self) -> dict[str, Any]:
