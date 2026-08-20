@@ -1,0 +1,14 @@
+{
+  "_source_note": "Trimmed real excerpt from https://fantasy.premierleague.com/api/bootstrap-static/, captured 2026-08-20, ahead of the 2026/27 GW1 deadline. Used to test Player.from_bootstrap_element parsing and baseline scoring against real field shapes.",
+  "elements": [
+    {"id": 1, "web_name": "Raya", "team": 1, "element_type": 1, "now_cost": 60, "status": "a", "chance_of_playing_next_round": null, "ep_next": "4.0", "points_per_game": "4.4", "selected_by_percent": "35.6"},
+    {"id": 4, "web_name": "Gabriel", "team": 1, "element_type": 2, "now_cost": 80, "status": "a", "chance_of_playing_next_round": null, "ep_next": "4.0", "points_per_game": "6.5", "selected_by_percent": "29.3"},
+    {"id": 5, "web_name": "J.Timber", "team": 1, "element_type": 2, "now_cost": 65, "status": "i", "chance_of_playing_next_round": 0, "ep_next": "0.0", "points_per_game": "5.0", "selected_by_percent": "0.2"},
+    {"id": 8, "web_name": "Calafiori", "team": 1, "element_type": 2, "now_cost": 55, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.5", "points_per_game": "4.2", "selected_by_percent": "30.7"},
+    {"id": 12, "web_name": "Saka", "team": 1, "element_type": 3, "now_cost": 95, "status": "a", "chance_of_playing_next_round": null, "ep_next": "3.2", "points_per_game": "5.1", "selected_by_percent": "9.4"},
+    {"id": 13, "web_name": "Rice", "team": 1, "element_type": 3, "now_cost": 75, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.6", "points_per_game": "5.1", "selected_by_percent": "19.3"},
+    {"id": 15, "web_name": "\u00d8degaard", "team": 1, "element_type": 3, "now_cost": 65, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.3", "points_per_game": "3.1", "selected_by_percent": "6.3"},
+    {"id": 25, "web_name": "Gy\u00f6keres", "team": 1, "element_type": 4, "now_cost": 75, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.3", "points_per_game": "3.6", "selected_by_percent": "10.3"},
+    {"id": 26, "web_name": "Havertz", "team": 1, "element_type": 4, "now_cost": 75, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.3", "points_per_game": "3.0", "selected_by_percent": "4.7"}
+  ]
+}
