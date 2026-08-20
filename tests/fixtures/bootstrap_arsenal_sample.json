@@ -9,6 +9,16 @@
     {"id": 13, "web_name": "Rice", "team": 1, "element_type": 3, "now_cost": 75, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.6", "points_per_game": "5.1", "selected_by_percent": "19.3"},
     {"id": 15, "web_name": "\u00d8degaard", "team": 1, "element_type": 3, "now_cost": 65, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.3", "points_per_game": "3.1", "selected_by_percent": "6.3"},
     {"id": 25, "web_name": "Gy\u00f6keres", "team": 1, "element_type": 4, "now_cost": 75, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.3", "points_per_game": "3.6", "selected_by_percent": "10.3"},
-    {"id": 26, "web_name": "Havertz", "team": 1, "element_type": 4, "now_cost": 75, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.3", "points_per_game": "3.0", "selected_by_percent": "4.7"}
+    {"id": 26, "web_name": "Havertz", "team": 1, "element_type": 4, "now_cost": 75, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.3", "points_per_game": "3.0", "selected_by_percent": "4.7"},
+    {"id": 28, "web_name": "Martinez", "team": 2, "element_type": 1, "now_cost": 50, "status": "a", "chance_of_playing_next_round": null, "ep_next": "2.6", "points_per_game": "3.8", "selected_by_percent": "4.7"}
+  ],
+  "teams": [
+    {"id": 1, "name": "Arsenal", "short_name": "ARS", "strength_overall_home": 4, "strength_overall_away": 5, "strength_attack_home": 0, "strength_attack_away": 0, "strength_defence_home": 0, "strength_defence_away": 0},
+    {"id": 2, "name": "Aston Villa", "short_name": "AVL", "strength_overall_home": 3, "strength_overall_away": 4, "strength_attack_home": 0, "strength_attack_away": 0, "strength_defence_home": 0, "strength_defence_away": 0}
+  ],
+  "events": [
+    {"id": 1, "name": "Gameweek 1", "deadline_time": "2026-08-21T17:30:00Z", "finished": false, "is_current": false, "is_next": true},
+    {"id": 2, "name": "Gameweek 2", "deadline_time": "2026-08-28T17:30:00Z", "finished": false, "is_current": false, "is_next": false}
   ]
 }
+

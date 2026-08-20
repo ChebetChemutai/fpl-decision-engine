@@ -1,13 +1,21 @@
 """Chip domain model — season 2026/27.
 
-Verified directly against premierleague.com (2026-08-20): four chip types
-this season — Wildcard, Free Hit, Bench Boost, Triple Captain — each
-usable ONCE PER HALF-SEASON WINDOW (8 chip uses total). The first-half
-window closes at the Gameweek 19 deadline; the second half runs from
-Gameweek 20 onward. There is no Assistant Manager chip in 2026/27 (it
-existed only in 2024/25) — an earlier draft of this file incorrectly
-included it based on a lower-quality secondary source; corrected against
-the official source before merging.
+Chip windows sourced directly from the live bootstrap-static `chips` array
+(fetched 2026-08-20), not inferred from articles — that payload is the
+actual source of truth FPL itself uses to gate chip legality:
+
+  wildcard:        first half start_event=2,  stop_event=19
+  free_hit:        first half start_event=2,  stop_event=19
+  bench_boost:     first half start_event=1,  stop_event=19
+  triple_captain:  first half start_event=1,  stop_event=19
+  (all four repeat for the second half: start_event=20, stop_event=38)
+
+Note the asymmetry this corrects for: Wildcard and Free Hit cannot be
+played in Gameweek 1 (they only open from GW2), while Bench Boost and
+Triple Captain CAN be played in GW1. An earlier draft of this module
+assumed all four chips shared one uniform window boundary — wrong, and
+caught by going back to the actual API payload instead of the secondary
+sources used for the scoring-rules verification.
 
 This module models chip *inventory and legality* only — *when* to play a
 chip is a Phase 12 (Chip Engine) strategy decision, not a domain-rules
@@ -20,8 +28,6 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-FIRST_HALF_LAST_GAMEWEEK = 19  # last GW the first-half chip set may be played in
-
 
 class Chip(StrEnum):
     WILDCARD = "wildcard"
@@ -31,8 +37,43 @@ class Chip(StrEnum):
 
 
 class ChipWindow(StrEnum):
-    FIRST_HALF = "first_half"  # GW1 - GW19 deadline
-    SECOND_HALF = "second_half"  # GW20 - season end
+    FIRST_HALF = "first_half"
+    SECOND_HALF = "second_half"
+
+
+# (chip, window) -> (first eligible gameweek, last eligible gameweek), verified
+# against the live bootstrap-static `chips` payload.
+CHIP_WINDOW_BOUNDS: dict[tuple[Chip, ChipWindow], tuple[int, int]] = {
+    (Chip.WILDCARD, ChipWindow.FIRST_HALF): (2, 19),
+    (Chip.WILDCARD, ChipWindow.SECOND_HALF): (20, 38),
+    (Chip.FREE_HIT, ChipWindow.FIRST_HALF): (2, 19),
+    (Chip.FREE_HIT, ChipWindow.SECOND_HALF): (20, 38),
+    (Chip.BENCH_BOOST, ChipWindow.FIRST_HALF): (1, 19),
+    (Chip.BENCH_BOOST, ChipWindow.SECOND_HALF): (20, 38),
+    (Chip.TRIPLE_CAPTAIN, ChipWindow.FIRST_HALF): (1, 19),
+    (Chip.TRIPLE_CAPTAIN, ChipWindow.SECOND_HALF): (20, 38),
+}
+
+
+def window_for_gameweek(chip: Chip, gameweek: int) -> ChipWindow:
+    """Which window a gameweek falls in, for a specific chip.
+
+    Must be per-chip, not global: GW1 is inside Bench Boost's first-half
+    window but outside Wildcard's/Free Hit's (which don't open until GW2).
+    """
+    for window in ChipWindow:
+        start, end = CHIP_WINDOW_BOUNDS[(chip, window)]
+        if start <= gameweek <= end:
+            return window
+    raise ValueError(f"gameweek {gameweek} is outside all {chip.value} windows")
+
+
+def is_gameweek_eligible(chip: Chip, gameweek: int) -> bool:
+    return any(
+        start <= gameweek <= end
+        for (c, _window), (start, end) in CHIP_WINDOW_BOUNDS.items()
+        if c == chip
+    )
 
 
 class ChipUse(BaseModel):
@@ -41,16 +82,10 @@ class ChipUse(BaseModel):
     window: ChipWindow
 
 
-def window_for_gameweek(gameweek: int) -> ChipWindow:
-    if gameweek <= FIRST_HALF_LAST_GAMEWEEK:
-        return ChipWindow.FIRST_HALF
-    return ChipWindow.SECOND_HALF
-
-
 class ChipState(BaseModel):
     """A manager's chip inventory as of a point in the season.
 
-    Every chip type has exactly one use per window; using the Gameweek-1
+    Every chip type has exactly one use per window; using the Gameweek-2
     Wildcard does not consume the second-half Wildcard, and vice versa.
     """
 
@@ -64,8 +99,11 @@ class ChipState(BaseModel):
         `gameweek` falls in. Does not mutate self — chip state must be as
         immutable/versioned as everything else that feeds a recommendation
         (architecture.md Sec 3).
+
+        Raises ValueError if `gameweek` is outside every window for this
+        chip (e.g. Wildcard in GW1) or if that window's use is already spent.
         """
-        window = window_for_gameweek(gameweek)
+        window = window_for_gameweek(chip, gameweek)
         if not self.is_available(chip, window=window):
             raise ValueError(f"{chip.value} already used in the {window.value} window")
         new_use = ChipUse(chip=chip, gameweek=gameweek, window=window)

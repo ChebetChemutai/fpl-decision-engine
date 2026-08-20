@@ -90,3 +90,79 @@ class Squad(BaseModel):
     @property
     def total_price(self) -> float:
         return round(sum(p.price for p in self.all_15), 1)
+
+
+class Team(BaseModel):
+    """A Premier League club, as of the snapshot it was read from."""
+
+    id: int
+    name: str
+    short_name: str
+    strength_overall_home: int
+    strength_overall_away: int
+    strength_attack_home: int
+    strength_attack_away: int
+    strength_defence_home: int
+    strength_defence_away: int
+
+    @classmethod
+    def from_bootstrap_team(cls, raw: dict[str, Any]) -> Team:
+        return cls(
+            id=int(raw["id"]),
+            name=str(raw["name"]),
+            short_name=str(raw["short_name"]),
+            strength_overall_home=int(raw["strength_overall_home"]),
+            strength_overall_away=int(raw["strength_overall_away"]),
+            strength_attack_home=int(raw["strength_attack_home"]),
+            strength_attack_away=int(raw["strength_attack_away"]),
+            strength_defence_home=int(raw["strength_defence_home"]),
+            strength_defence_away=int(raw["strength_defence_away"]),
+        )
+
+
+class GameweekEvent(BaseModel):
+    """One Gameweek's metadata (deadline, status) — FPL calls this an 'event'."""
+
+    id: int
+    name: str
+    deadline_time: str
+    finished: bool
+    is_current: bool
+    is_next: bool
+
+    @classmethod
+    def from_bootstrap_event(cls, raw: dict[str, Any]) -> GameweekEvent:
+        return cls(
+            id=int(raw["id"]),
+            name=str(raw["name"]),
+            deadline_time=str(raw["deadline_time"]),
+            finished=bool(raw["finished"]),
+            is_current=bool(raw["is_current"]),
+            is_next=bool(raw["is_next"]),
+        )
+
+
+class Fixture(BaseModel):
+    """A single scheduled or completed match between two clubs."""
+
+    id: int
+    event: int | None = Field(description="Gameweek number; None if not yet scheduled.")
+    team_h: int
+    team_a: int
+    team_h_difficulty: int | None = None
+    team_a_difficulty: int | None = None
+    kickoff_time: str | None = None
+    finished: bool = False
+
+    @classmethod
+    def from_raw_fixture(cls, raw: dict[str, Any]) -> Fixture:
+        return cls(
+            id=int(raw["id"]),
+            event=int(raw["event"]) if raw.get("event") is not None else None,
+            team_h=int(raw["team_h"]),
+            team_a=int(raw["team_a"]),
+            team_h_difficulty=raw.get("team_h_difficulty"),
+            team_a_difficulty=raw.get("team_a_difficulty"),
+            kickoff_time=raw.get("kickoff_time"),
+            finished=bool(raw.get("finished", False)),
+        )

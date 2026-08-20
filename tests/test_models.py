@@ -43,3 +43,74 @@ def test_parses_goalkeeper_position(real_elements: list[dict[str, object]]) -> N
 
     assert player.position == Position.GKP
     assert player.price == 6.0
+
+
+def test_parses_team_from_bootstrap_shape() -> None:
+    from fpl_engine.domain.models import Team
+
+    raw = {
+        "id": 1,
+        "name": "Arsenal",
+        "short_name": "ARS",
+        "strength_overall_home": 4,
+        "strength_overall_away": 5,
+        "strength_attack_home": 0,
+        "strength_attack_away": 0,
+        "strength_defence_home": 0,
+        "strength_defence_away": 0,
+    }
+
+    team = Team.from_bootstrap_team(raw)
+
+    assert team.id == 1
+    assert team.short_name == "ARS"
+
+
+def test_parses_gameweek_event_from_bootstrap_shape() -> None:
+    from fpl_engine.domain.models import GameweekEvent
+
+    raw = {
+        "id": 1,
+        "name": "Gameweek 1",
+        "deadline_time": "2026-08-21T17:30:00Z",
+        "finished": False,
+        "is_current": False,
+        "is_next": True,
+    }
+
+    event = GameweekEvent.from_bootstrap_event(raw)
+
+    assert event.id == 1
+    assert event.is_next is True
+
+
+def test_parses_fixture_from_raw_shape() -> None:
+    from fpl_engine.domain.models import Fixture
+
+    raw = {
+        "id": 1,
+        "event": 1,
+        "team_h": 1,
+        "team_a": 2,
+        "team_h_difficulty": 3,
+        "team_a_difficulty": 2,
+        "kickoff_time": "2026-08-21T19:00:00Z",
+        "finished": False,
+    }
+
+    fixture = Fixture.from_raw_fixture(raw)
+
+    assert fixture.team_h == 1
+    assert fixture.team_a == 2
+    assert fixture.event == 1
+
+
+def test_parses_fixture_with_no_scheduled_event_yet() -> None:
+    from fpl_engine.domain.models import Fixture
+
+    raw = {"id": 1, "event": None, "team_h": 1, "team_a": 2}
+
+    fixture = Fixture.from_raw_fixture(raw)
+
+    assert fixture.event is None
+    assert fixture.finished is False
