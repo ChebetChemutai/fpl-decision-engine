@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 
 from fpl_engine import __version__
 from fpl_engine.config import get_settings
+
+if TYPE_CHECKING:
+    from fpl_engine.config import Settings
+    from fpl_engine.domain.models import Player, ScoredPlayer
 
 app = typer.Typer(
     name="fpl",
@@ -70,16 +76,30 @@ def ingest(
 def squad_recommend(
     gameweek: int = typer.Option(..., help="Gameweek to build the recommendation for."),
     budget: float = typer.Option(100.0, help="Total squad budget in £m."),
+    mode: str = typer.Option(
+        "enhanced",
+        help=(
+            "'baseline' (ep_next + availability only — the reproducible control "
+            "group) or 'enhanced' (adds fixture difficulty and a history-based "
+            "cold-start prior on top of the same baseline)."
+        ),
+    ),
 ) -> None:
-    """Build and print a baseline squad recommendation from the latest snapshot.
+    """Build and print a squad recommendation from the latest snapshot.
 
-    Run `fpl ingest --gameweek N` first. This is the Phase 1.5 baseline model
-    — see docs/architecture.md Sec 17. It is explicitly a floor, not the
-    target architecture.
+    Run `fpl ingest --gameweek N` first (and `fpl ingest-history` for the
+    historical prior, optional). 'enhanced' is the default recommendation
+    mode; 'baseline' reproduces the original Phase 1.5 ep_next-only model
+    exactly, so the two can be compared directly — see
+    docs/architecture.md Sec 18.
     """
     from fpl_engine.baseline.squad_builder import build_squad
     from fpl_engine.data.snapshot import read_latest_snapshot_any_season
     from fpl_engine.domain.models import Player
+
+    if mode not in ("baseline", "enhanced"):
+        typer.echo(f"--mode must be 'baseline' or 'enhanced', got {mode!r}")
+        raise typer.Exit(code=1)
 
     settings = get_settings()
     try:
@@ -96,10 +116,14 @@ def squad_recommend(
     elements = envelope["payload"]["elements"]
     players = [Player.from_bootstrap_element(e) for e in elements]
 
-    squad = build_squad(players, budget=budget)
+    scored_override = None
+    if mode == "enhanced":
+        scored_override = _build_enhanced_scores(settings, players, gameweek)
+
+    squad = build_squad(players, budget=budget, scored_override=scored_override)
 
     captured_at = envelope["captured_at"]
-    typer.echo(f"[BASELINE MODEL — Phase 1.5, GW{gameweek}] captured_at={captured_at}")
+    typer.echo(f"[{mode.upper()} MODEL — GW{gameweek}] captured_at={captured_at}")
     typer.echo(f"Squad cost: £{squad.total_price}m / £{budget}m\n")
 
     typer.echo("STARTING XI")
@@ -121,6 +145,68 @@ def squad_recommend(
             f"  {i}. {p.position.name:<4} {p.web_name:<20} £{p.price:>4.1f}m "
             f" ep_next={p.ep_next:>4.1f}"
         )
+
+
+def _build_enhanced_scores(
+    settings: Settings, players: list[Player], gameweek: int
+) -> list[ScoredPlayer]:
+    """Assemble enhanced-mode scores: fixture difficulty (from the fixtures
+    snapshot) layered with a history-based cold-start prior (from the
+    element-history snapshot, optional). Missing either snapshot degrades
+    gracefully — a missing fixtures snapshot falls back to a neutral
+    multiplier for every team (not a silent 0, which would zero every
+    score); a missing history snapshot just means no players get a prior,
+    same as if none of them needed one.
+    """
+    from fpl_engine.baseline.fixture_signal import (
+        fixture_score_multiplier,
+        team_difficulties_for_gameweek,
+    )
+    from fpl_engine.baseline.historical_prior import historical_prior_score
+    from fpl_engine.baseline.scoring import score_players_enhanced
+    from fpl_engine.data.contracts import parse_element_history
+    from fpl_engine.data.snapshot import read_latest_snapshot_any_season
+    from fpl_engine.domain.models import Fixture
+
+    team_ids = {p.team_id for p in players}
+
+    fixture_multipliers: dict[int, float] = {}
+    try:
+        fixtures_envelope = read_latest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_fixtures", gameweek=gameweek
+        )
+        raw_fixtures = [
+            Fixture.from_raw_fixture(f) for f in fixtures_envelope["payload"]["fixtures"]
+        ]
+        for team_id in team_ids:
+            diffs = team_difficulties_for_gameweek(raw_fixtures, team_id, gameweek)
+            fixture_multipliers[team_id] = fixture_score_multiplier(diffs)
+    except FileNotFoundError:
+        typer.echo(
+            f"  (no fixtures snapshot for GW{gameweek} — fixture difficulty "
+            f"skipped this run; falling back to neutral for every team)"
+        )
+        fixture_multipliers = dict.fromkeys(team_ids, 1.0)
+
+    historical_priors: dict[int, float] = {}
+    try:
+        history_envelope = read_latest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_element_history", gameweek=gameweek
+        )
+        player_histories = history_envelope["payload"]["player_histories"]
+        for pid_str, raw_history in player_histories.items():
+            parsed = parse_element_history(int(pid_str), raw_history)
+            prior = historical_prior_score(parsed.past_seasons)
+            if prior is not None:
+                historical_priors[int(pid_str)] = prior
+    except FileNotFoundError:
+        typer.echo(
+            f"  (no element-history snapshot for GW{gameweek} — historical "
+            f"priors skipped this run; run `fpl ingest-history --gameweek "
+            f"{gameweek}` to enable them)"
+        )
+
+    return score_players_enhanced(players, fixture_multipliers, historical_priors)
 
 
 @app.command("ingest-history")

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fpl_engine.baseline.optimizer import optimize_squad, optimize_starting_xi
 from fpl_engine.baseline.scoring import score_players
-from fpl_engine.domain.models import Player, Position, Squad
+from fpl_engine.domain.models import Player, Position, ScoredPlayer, Squad
 from fpl_engine.domain.rules import BUDGET_M, validate_squad, validate_starting_xi
 
 # Captaining a goalkeeper is strategically weak even at equal expected
@@ -17,15 +17,28 @@ from fpl_engine.domain.rules import BUDGET_M, validate_squad, validate_starting_
 CAPTAIN_ELIGIBLE_POSITIONS = {Position.DEF, Position.MID, Position.FWD}
 
 
-def build_squad(players: list[Player], budget: float = BUDGET_M) -> Squad:
+def build_squad(
+    players: list[Player],
+    budget: float = BUDGET_M,
+    scored_override: list[ScoredPlayer] | None = None,
+) -> Squad:
     """Run scoring -> squad optimization -> XI optimization -> captaincy.
+
+    By default scores with the baseline model (`score_players`) — this is
+    the reproducible control group (integration spec Sec 3, 18) and must
+    stay exactly this call with no hidden extra logic. Pass
+    `scored_override` (e.g. from `score_players_enhanced`) to run the
+    same pipeline against enhanced scores instead — the optimizer, XI
+    selection, bench ordering, and captaincy logic are identical either
+    way, so baseline and enhanced squads are directly comparable; only
+    the input scores differ.
 
     Raises AssertionError if the result fails rules validation — that should
     never happen given a correct optimizer, but we check anyway (architecture
     Sec 14 testing strategy: an illegal recommendation is worse than a
     suboptimal one).
     """
-    scored = score_players(players)
+    scored = scored_override if scored_override is not None else score_players(players)
     scores_by_id = {sp.player.id: sp.score for sp in scored}
 
     squad_15 = optimize_squad(scored, budget=budget)

@@ -1,0 +1,236 @@
+"""CLI integration tests.
+
+Mocks FplClient entirely — the unit test suite must never depend on the
+live FPL API (integration spec Sec 12). `ingest`/`ingest_history` are
+tested by substituting a fake client; `squad` is tested by writing real-
+shaped snapshot files directly, since that command never touches the
+network itself, only the filesystem.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from typer.testing import CliRunner
+
+from fpl_engine.cli import app
+
+runner = CliRunner()
+
+# A tiny but structurally real bootstrap-static shape: enough players to
+# fill a legal squad (2 GKP, 5 DEF, 5 MID, 3 FWD = 15, spread across 6
+# clubs to respect the max-3-per-club rule), plus one MID with ep_next=0
+# to exercise the historical-prior fallback path.
+def _player(
+    pid: int, name: str, team: int, element_type: int, cost: int, ep_next: str
+) -> dict[str, Any]:
+    return {
+        "id": pid, "web_name": name, "team": team, "element_type": element_type,
+        "now_cost": cost, "status": "a", "chance_of_playing_next_round": None,
+        "ep_next": ep_next, "points_per_game": ep_next, "selected_by_percent": "5.0",
+    }
+
+
+_FAKE_BOOTSTRAP: dict[str, Any] = {
+    "elements": [
+        _player(1, "GK1", 1, 1, 45, "4.0"),
+        _player(2, "GK2", 2, 1, 40, "3.0"),
+        _player(3, "DEF1", 1, 2, 45, "3.0"),
+        _player(4, "DEF2", 2, 2, 45, "3.2"),
+        _player(5, "DEF3", 3, 2, 45, "2.8"),
+        _player(6, "DEF4", 4, 2, 45, "2.9"),
+        _player(7, "DEF5", 5, 2, 45, "3.1"),
+        _player(8, "MID1", 3, 3, 55, "0.0"),  # ep_next=0 -> exercises historical-prior fallback
+        _player(9, "MID2", 4, 3, 60, "3.5"),
+        _player(10, "MID3", 5, 3, 60, "3.6"),
+        _player(11, "MID4", 6, 3, 55, "3.0"),
+        _player(12, "MID5", 6, 3, 55, "3.1"),
+        _player(16, "MID6", 4, 3, 55, "3.2"),
+        _player(13, "FWD1", 1, 4, 55, "2.5"),
+        _player(14, "FWD2", 2, 4, 55, "2.6"),
+        _player(15, "FWD3", 3, 4, 55, "2.4"),
+    ],
+    "teams": [
+        {
+            "id": i, "name": f"Team {i}", "short_name": f"TM{i}",
+            "strength_overall_home": 3, "strength_overall_away": 3,
+            "strength_attack_home": 3, "strength_attack_away": 3,
+            "strength_defence_home": 3, "strength_defence_away": 3,
+        }
+        for i in range(1, 7)
+    ],
+    "events": [
+        {
+            "id": 1, "name": "Gameweek 1", "deadline_time": "2026-08-21T17:30:00Z",
+            "finished": False, "is_current": False, "is_next": True,
+        }
+    ],
+    "game_config": {"settings": {"static_content_url": "https://example.com/fantasy/2026_27/img"}},
+}
+
+_FAKE_FIXTURES: list[dict[str, Any]] = [
+    {
+        "id": 1, "event": 1, "team_h": 1, "team_a": 2,
+        "team_h_difficulty": 2, "team_a_difficulty": 4,
+        "kickoff_time": "2026-08-21T19:00:00Z", "finished": False,
+    },
+    {
+        "id": 2, "event": 1, "team_h": 3, "team_a": 4,
+        "team_h_difficulty": 3, "team_a_difficulty": 3,
+        "kickoff_time": "2026-08-21T19:00:00Z", "finished": False,
+    },
+    {
+        "id": 3, "event": 1, "team_h": 5, "team_a": 6,
+        "team_h_difficulty": 2, "team_a_difficulty": 4,
+        "kickoff_time": "2026-08-21T19:00:00Z", "finished": False,
+    },
+]
+
+
+class _FakeFplClient:
+    """Stand-in for FplClient — no network, deterministic fake data."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def __enter__(self) -> _FakeFplClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        pass
+
+    def fetch_bootstrap(self) -> dict[str, Any]:
+        return _FAKE_BOOTSTRAP
+
+    def fetch_fixtures(self, event: int | None = None) -> list[dict[str, Any]]:
+        return _FAKE_FIXTURES
+
+    def fetch_element_summary(self, element_id: int) -> dict[str, Any]:
+        return {"history": [], "history_past": []}
+
+
+def _write_snapshot(
+    tmp_path: Path, source: str, season: str, gameweek: int, payload: dict[str, Any]
+) -> None:
+    target_dir = tmp_path / "raw" / source / season / str(gameweek)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    envelope = {
+        "source": source, "season": season, "gameweek": gameweek,
+        "schema_version": 1, "captured_at": "20260821T000000Z", "payload": payload,
+    }
+    (target_dir / "20260821T000000Z.json").write_text(json.dumps(envelope), encoding="utf-8")
+
+
+def test_ingest_writes_bootstrap_and_fixtures_snapshots(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeFplClient)
+
+    result = runner.invoke(app, ["ingest", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    assert "bootstrap snapshot" in result.stdout
+    assert "players ingested   : 16" in result.stdout
+    bootstrap_files = list((tmp_path / "raw" / "fpl_bootstrap").rglob("*.json"))
+    fixtures_files = list((tmp_path / "raw" / "fpl_fixtures").rglob("*.json"))
+    assert len(bootstrap_files) == 1
+    assert len(fixtures_files) == 1
+
+
+def test_ingest_history_fetches_every_player_from_latest_bootstrap(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeFplClient)
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    result = runner.invoke(app, ["ingest-history", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    assert "players fetched           : 16" in result.stdout
+    history_files = list((tmp_path / "raw" / "fpl_element_history").rglob("*.json"))
+    assert len(history_files) == 1
+
+
+def test_ingest_history_respects_limit(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeFplClient)
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    result = runner.invoke(app, ["ingest-history", "--gameweek", "1", "--limit", "3"])
+
+    assert result.exit_code == 0
+    assert "players fetched           : 3" in result.stdout
+
+
+def test_ingest_history_fails_clearly_without_a_bootstrap_snapshot(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["ingest-history", "--gameweek", "1"])
+
+    assert result.exit_code == 1
+    assert "fpl ingest --gameweek 1" in result.stdout
+
+
+def test_squad_fails_clearly_without_a_snapshot(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["squad", "--gameweek", "1"])
+
+    assert result.exit_code == 1
+    assert "fpl ingest --gameweek 1" in result.stdout
+
+
+def test_squad_rejects_invalid_mode(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["squad", "--gameweek", "1", "--mode", "bogus"])
+
+    assert result.exit_code == 1
+    assert "bogus" in result.stdout
+
+
+def test_squad_baseline_mode_produces_a_legal_squad(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    result = runner.invoke(
+        app, ["squad", "--gameweek", "1", "--budget", "9999", "--mode", "baseline"]
+    )
+
+    assert result.exit_code == 0
+    assert "BASELINE MODEL" in result.stdout
+
+
+def test_squad_enhanced_mode_falls_back_gracefully_without_fixtures_or_history(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    """Enhanced mode with neither fixtures nor element-history ingested
+    must degrade to neutral fixture multipliers and no historical priors -
+    never crash.
+    """
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    result = runner.invoke(app, ["squad", "--gameweek", "1", "--budget", "9999"])
+
+    assert result.exit_code == 0
+    assert "ENHANCED MODEL" in result.stdout
+    assert "fixture difficulty skipped" in result.stdout
+    assert "historical priors skipped" in result.stdout
+
+
+def test_squad_enhanced_mode_uses_fixture_difficulty_when_available(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+    _write_snapshot(tmp_path, "fpl_fixtures", "2026_27", 1, {"fixtures": _FAKE_FIXTURES})
+
+    result = runner.invoke(app, ["squad", "--gameweek", "1", "--budget", "9999"])
+
+    assert result.exit_code == 0
+    assert "fixture difficulty skipped" not in result.stdout

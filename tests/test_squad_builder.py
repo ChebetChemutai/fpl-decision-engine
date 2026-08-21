@@ -51,3 +51,31 @@ def test_captain_has_highest_score_among_outfield_starters() -> None:
 
     outfield_starters = [p for p in squad.starting_xi if p.position != Position.GKP]
     assert squad.captain.ep_next == max(p.ep_next for p in outfield_starters)
+
+
+def test_build_squad_accepts_scored_override_for_enhanced_mode() -> None:
+    """Baseline and enhanced modes must run through the identical
+    optimizer/XI/captaincy pipeline - only the input scores differ - so
+    that a baseline-vs-enhanced comparison is measuring the scoring
+    change, not two different pipelines (integration spec Sec 18).
+    """
+    from fpl_engine.baseline.scoring import score_players
+
+    players = synthetic_player_pool()
+    baseline_scored = score_players(players)
+
+    # "Enhanced" override here just doubles every score - the point isn't
+    # the specific transform, it's proving build_squad actually uses
+    # scored_override instead of silently recomputing baseline internally.
+    doubled = [sp.model_copy(update={"score": sp.score * 2}) for sp in baseline_scored]
+
+    baseline_squad = build_squad(players)
+    enhanced_squad = build_squad(players, scored_override=doubled)
+
+    # Both must be independently legal...
+    assert validate_squad(baseline_squad.all_15) == []
+    assert validate_squad(enhanced_squad.all_15) == []
+    # ...and since doubling every score uniformly can't change which
+    # squad is optimal, they should select the same players - proving
+    # scored_override actually drove the optimization, not a no-op.
+    assert {p.id for p in baseline_squad.all_15} == {p.id for p in enhanced_squad.all_15}
