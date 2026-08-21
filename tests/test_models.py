@@ -114,3 +114,26 @@ def test_parses_fixture_with_no_scheduled_event_yet() -> None:
 
     assert fixture.event is None
     assert fixture.finished is False
+
+
+def test_parses_season_summary_from_history_past_shape() -> None:
+    from fpl_engine.domain.models import SeasonSummary
+
+    raw = {
+        "season_name": "2025/26",
+        "element_code": 226597,
+        "start_cost": 60,
+        "end_cost": 73,
+        "total_points": 209,
+        "minutes": 2750,
+        "goals_scored": 3,
+        "assists": 5,
+        "clean_sheets": 18,
+        "starts": 30,
+    }
+
+    summary = SeasonSummary.from_history_past_entry(raw)
+
+    assert summary.season_name == "2025/26"
+    assert summary.total_points == 209
+    assert summary.starts == 30

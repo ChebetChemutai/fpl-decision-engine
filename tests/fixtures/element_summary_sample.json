@@ -1,0 +1,8 @@
+{
+  "_source_note": "Real excerpt from https://fantasy.premierleague.com/api/element-summary/4/, captured 2026-08-21 - ahead of GW1, so 'history' (current season, per-gameweek) is genuinely empty. 'history_past' is trimmed to 2 seasons for brevity; field shapes are unmodified.",
+  "history": [],
+  "history_past": [
+    {"season_name": "2024/25", "element_code": 226597, "start_cost": 60, "end_cost": 61, "total_points": 117, "minutes": 2363, "goals_scored": 3, "assists": 2, "clean_sheets": 10, "starts": 28},
+    {"season_name": "2025/26", "element_code": 226597, "start_cost": 60, "end_cost": 73, "total_points": 209, "minutes": 2750, "goals_scored": 3, "assists": 5, "clean_sheets": 18, "starts": 30}
+  ]
+}

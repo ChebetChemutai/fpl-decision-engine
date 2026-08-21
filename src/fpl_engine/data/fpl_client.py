@@ -41,6 +41,17 @@ class FplClient:
         result: list[dict[str, Any]] = response.json()
         return result
 
+    def fetch_element_summary(self, element_id: int) -> dict[str, Any]:
+        """GET /element-summary/{element_id}/ — one player's per-gameweek
+        history for the CURRENT season (`history`, empty until gameweeks
+        have actually been played) and season-level totals for prior
+        seasons (`history_past`, no per-gameweek breakdown available).
+        """
+        response = self._client.get(f"/element-summary/{element_id}/")
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
     def close(self) -> None:
         self._client.close()
 

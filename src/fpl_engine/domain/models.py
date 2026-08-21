@@ -142,6 +142,28 @@ class GameweekEvent(BaseModel):
         )
 
 
+class SeasonSummary(BaseModel):
+    """A player's aggregate totals for one PAST season — season-level only,
+    the official API does not expose a per-gameweek breakdown for prior
+    seasons (verified 2026-08-21 against a live element-summary response).
+    Useful as a cold-start prior, never as temporal per-gameweek data.
+    """
+
+    season_name: str
+    total_points: int
+    minutes: int
+    starts: int
+
+    @classmethod
+    def from_history_past_entry(cls, raw: dict[str, Any]) -> SeasonSummary:
+        return cls(
+            season_name=str(raw["season_name"]),
+            total_points=int(raw["total_points"]),
+            minutes=int(raw["minutes"]),
+            starts=int(raw["starts"]),
+        )
+
+
 class Fixture(BaseModel):
     """A single scheduled or completed match between two clubs."""
 

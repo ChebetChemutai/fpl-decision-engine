@@ -13,7 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from fpl_engine.domain.models import Fixture, GameweekEvent, Player, Team
+from fpl_engine.domain.models import Fixture, GameweekEvent, Player, SeasonSummary, Team
+from fpl_engine.features.temporal import GameweekPerformance
 
 REQUIRED_BOOTSTRAP_KEYS = {"elements", "teams", "events"}
 
@@ -157,3 +158,61 @@ def cross_check_referential_integrity(parsed: ParsedBootstrap) -> list[Validatio
                 )
             )
     return issues
+
+
+@dataclass
+class ParsedElementHistory:
+    """One player's parsed element-summary response.
+
+    `current_season` is per-gameweek and genuinely temporal — it will be
+    empty until gameweeks have actually been played (see
+    fpl_client.fetch_element_summary docstring). `past_seasons` is
+    season-level only; never treat it as per-gameweek data no matter how
+    tempting that would be for filling out a thin current-season history.
+    """
+
+    current_season: list[GameweekPerformance] = field(default_factory=list)
+    past_seasons: list[SeasonSummary] = field(default_factory=list)
+    issues: list[ValidationIssue] = field(default_factory=list)
+
+    @property
+    def is_clean(self) -> bool:
+        return len(self.issues) == 0
+
+
+def parse_element_history(player_id: int, raw: dict[str, Any]) -> ParsedElementHistory:
+    """Parse a raw /element-summary/{id}/ payload."""
+    result = ParsedElementHistory()
+
+    for raw_gw in raw.get("history", []):
+        try:
+            result.current_season.append(
+                GameweekPerformance(
+                    gameweek=int(raw_gw["round"]),
+                    minutes=int(raw_gw["minutes"]),
+                    total_points=int(raw_gw["total_points"]),
+                )
+            )
+        except (KeyError, ValueError, TypeError) as exc:
+            result.issues.append(
+                ValidationIssue(
+                    entity="gameweek_performance",
+                    identifier=f"player={player_id} round={raw_gw.get('round', '<unknown>')}",
+                    message=str(exc),
+                )
+            )
+
+    for raw_season in raw.get("history_past", []):
+        try:
+            result.past_seasons.append(SeasonSummary.from_history_past_entry(raw_season))
+        except (KeyError, ValueError, TypeError) as exc:
+            season_name = raw_season.get("season_name", "<unknown>")
+            result.issues.append(
+                ValidationIssue(
+                    entity="season_summary",
+                    identifier=f"player={player_id} season={season_name}",
+                    message=str(exc),
+                )
+            )
+
+    return result

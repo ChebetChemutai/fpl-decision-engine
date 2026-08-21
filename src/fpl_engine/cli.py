@@ -123,6 +123,63 @@ def squad_recommend(
         )
 
 
+@app.command("ingest-history")
+def ingest_history(
+    gameweek: int = typer.Option(..., help="Gameweek this snapshot is captured ahead of."),
+    limit: int | None = typer.Option(
+        None, help="Optional cap on number of players to fetch — useful while testing."
+    ),
+) -> None:
+    """Pull per-player gameweek history (element-summary) for every player
+    in the latest bootstrap snapshot.
+
+    Sequential, one request per player (~600 requests) — deliberately
+    simple for now; batching/concurrency is a Phase 19 (production
+    hardening) concern, not something to add before it's needed. Expect
+    this to take a while. `current_season` history will be EMPTY for any
+    gameweek that hasn't been played yet — that's correct, not a bug; see
+    docs/architecture.md Sec 18 on why real per-gameweek data can only
+    accumulate one gameweek at a time.
+    """
+    from fpl_engine.data.fpl_client import FplClient
+    from fpl_engine.data.snapshot import read_latest_snapshot_any_season, write_snapshot
+
+    settings = get_settings()
+    try:
+        bootstrap_envelope = read_latest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_bootstrap", gameweek=gameweek
+        )
+    except FileNotFoundError:
+        typer.echo(
+            f"No bootstrap snapshot for GW{gameweek}. "
+            f"Run `fpl ingest --gameweek {gameweek}` first."
+        )
+        raise typer.Exit(code=1) from None
+
+    bootstrap_payload = bootstrap_envelope["payload"]
+    player_ids = [int(e["id"]) for e in bootstrap_payload["elements"]]
+    if limit is not None:
+        player_ids = player_ids[:limit]
+
+    histories: dict[str, object] = {}
+    with FplClient() as client:
+        for i, player_id in enumerate(player_ids, start=1):
+            histories[str(player_id)] = client.fetch_element_summary(player_id)
+            if i % 50 == 0 or i == len(player_ids):
+                typer.echo(f"  fetched {i}/{len(player_ids)} player histories...")
+
+    season = _current_season_label(bootstrap_payload)
+    path = write_snapshot(
+        raw_dir=settings.raw_dir,
+        source="fpl_element_history",
+        season=season,
+        gameweek=gameweek,
+        payload={"player_histories": histories},
+    )
+    typer.echo(f"element history snapshot : {path}")
+    typer.echo(f"players fetched           : {len(histories)}")
+
+
 def _current_season_label(bootstrap: dict[str, object]) -> str:
     """Derive a 'YYYY_YY' season label from the bootstrap payload's static
     content URL, falling back to a generic label if the shape changes."""
