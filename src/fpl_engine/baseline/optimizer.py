@@ -4,6 +4,13 @@ Uses an actual mixed-integer linear program (PuLP/CBC) rather than "sort by
 score and take the top N" — sorting alone cannot respect the budget, club,
 and position constraints simultaneously (architecture.md Sec 16, "never
 simply select the highest predicted players").
+
+Solver note: uses COIN_CMD (PuLP's current non-deprecated solver API),
+not PULP_CBC_CMD. Verified before migrating that COIN_CMD actually
+resolves to a working CBC binary in this environment — it doesn't by
+default; the `pulp[cbc]` extra (see pyproject.toml) installs one.
+Migrating without checking that first would have silently broken every
+optimize_* call.
 """
 
 from __future__ import annotations
@@ -36,7 +43,8 @@ def optimize_squad(scored_players: list[ScoredPlayer], budget: float = BUDGET_M)
 
     problem = pulp.LpProblem("fpl_squad_selection", pulp.LpMaximize)
     choice_vars = {
-        sp.player.id: pulp.LpVariable(f"pick_{sp.player.id}", cat="Binary") for sp in candidates
+        sp.player.id: problem.add_variable(f"pick_{sp.player.id}", cat="Binary")
+        for sp in candidates
     }
 
     problem += pulp.lpSum(choice_vars[sp.player.id] * sp.score for sp in candidates)
@@ -65,7 +73,7 @@ def optimize_squad(scored_players: list[ScoredPlayer], budget: float = BUDGET_M)
             <= MAX_PER_CLUB
         )
 
-    status = problem.solve(pulp.PULP_CBC_CMD(msg=False))
+    status = problem.solve(pulp.COIN_CMD(msg=False))
     if pulp.LpStatus[status] != "Optimal":
         raise InfeasibleSquadError(
             f"solver returned status={pulp.LpStatus[status]!r} — "
@@ -81,7 +89,7 @@ def optimize_squad(scored_players: list[ScoredPlayer], budget: float = BUDGET_M)
 def optimize_starting_xi(squad: list[Player], scores: dict[int, float]) -> list[Player]:
     """Select the score-maximizing legal starting XI from an already-legal squad."""
     problem = pulp.LpProblem("fpl_xi_selection", pulp.LpMaximize)
-    start_vars = {p.id: pulp.LpVariable(f"start_{p.id}", cat="Binary") for p in squad}
+    start_vars = {p.id: problem.add_variable(f"start_{p.id}", cat="Binary") for p in squad}
 
     problem += pulp.lpSum(start_vars[p.id] * scores[p.id] for p in squad)
     problem += pulp.lpSum(start_vars.values()) == 11
@@ -94,7 +102,7 @@ def optimize_starting_xi(squad: list[Player], scores: dict[int, float]) -> list[
             problem += pulp.lpSum(position_vars) >= rule.min_play
             problem += pulp.lpSum(position_vars) <= rule.max_play
 
-    status = problem.solve(pulp.PULP_CBC_CMD(msg=False))
+    status = problem.solve(pulp.COIN_CMD(msg=False))
     if pulp.LpStatus[status] != "Optimal":
         raise InfeasibleXIError(f"solver returned status={pulp.LpStatus[status]!r}")
 
