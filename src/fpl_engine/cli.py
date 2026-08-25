@@ -266,6 +266,148 @@ def ingest_history(
     typer.echo(f"players fetched           : {len(histories)}")
 
 
+@app.command("chip-status")
+def chip_status(
+    gameweek: int = typer.Option(..., help="Gameweek to check chip legality for."),
+) -> None:
+    """Show, for each of the 4 chips, whether it's eligible this gameweek
+    and whether you've already used it in the relevant half-season window.
+
+    Chip rules come entirely from domain/chips.py — this command only
+    reads and displays; it duplicates none of the eligibility logic.
+    """
+    from fpl_engine.data.state import read_chip_state
+    from fpl_engine.domain.chips import Chip, is_gameweek_eligible, window_for_gameweek
+
+    settings = get_settings()
+    state = read_chip_state(settings.data_dir)
+
+    typer.echo(f"Chip status for GW{gameweek}:")
+    for chip in Chip:
+        if not is_gameweek_eligible(chip, gameweek):
+            typer.echo(f"  {chip.value:<15} not eligible this gameweek")
+            continue
+        window = window_for_gameweek(chip, gameweek)
+        available = state.is_available(chip, window=window)
+        status = "available" if available else f"already used ({window.value})"
+        typer.echo(f"  {chip.value:<15} {status}")
+
+
+@app.command("chip-play")
+def chip_play(
+    chip: str = typer.Option(..., help="wildcard | free_hit | bench_boost | triple_captain"),
+    gameweek: int = typer.Option(..., help="Gameweek to play the chip in."),
+) -> None:
+    """Record a chip as played for this gameweek. Validates legality
+    entirely through domain/chips.py::ChipState.play — this command does
+    not re-implement or duplicate the eligibility/window rules.
+    """
+    from fpl_engine.data.state import read_chip_state, write_chip_state
+    from fpl_engine.domain.chips import Chip
+
+    try:
+        chip_enum = Chip(chip)
+    except ValueError:
+        valid = ", ".join(c.value for c in Chip)
+        typer.echo(f"'{chip}' is not a valid chip. Valid options: {valid}")
+        raise typer.Exit(code=1) from None
+
+    settings = get_settings()
+    state = read_chip_state(settings.data_dir)
+    try:
+        updated = state.play(chip_enum, gameweek)
+    except ValueError as exc:
+        typer.echo(f"Cannot play {chip}: {exc}")
+        raise typer.Exit(code=1) from None
+
+    write_chip_state(settings.data_dir, updated)
+    typer.echo(f"Recorded: {chip} played in GW{gameweek}.")
+
+
+@app.command("transfer-check")
+def transfer_check(
+    gameweek: int = typer.Option(..., help="Gameweek the current squad's prices are from."),
+    current: list[int] = typer.Option(  # noqa: B008
+        ..., help="Player IDs of your current 15-man squad."
+    ),
+    out_ids: list[int] = typer.Option(  # noqa: B008
+        ..., "--out", help="Player ID(s) to transfer out."
+    ),
+    in_ids: list[int] = typer.Option(  # noqa: B008
+        ..., "--in", help="Player ID(s) to transfer in."
+    ),
+    free_transfers: int = typer.Option(1, help="Free transfers available this gameweek."),
+) -> None:
+    """Validate a candidate transfer (or set of transfers) against the
+    domain rules and report the resulting squad's legality and cost.
+
+    This is validation only — no search, no recommendation of WHICH
+    transfer to make (integration spec Sec 9: that's a future transfer
+    optimizer's job, not this command's).
+    """
+    from fpl_engine.data.snapshot import read_latest_snapshot_any_season
+    from fpl_engine.domain.models import Player
+    from fpl_engine.domain.rules import validate_squad
+    from fpl_engine.domain.transfers import calculate_transfer_cost
+
+    if len(out_ids) != len(in_ids):
+        typer.echo(
+            f"--out and --in must have the same count "
+            f"(got {len(out_ids)} out, {len(in_ids)} in)."
+        )
+        raise typer.Exit(code=1)
+
+    settings = get_settings()
+    try:
+        envelope = read_latest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_bootstrap", gameweek=gameweek
+        )
+    except FileNotFoundError:
+        typer.echo(
+            f"No snapshot found for GW{gameweek}. "
+            f"Run `fpl ingest --gameweek {gameweek}` first."
+        )
+        raise typer.Exit(code=1) from None
+
+    all_players = {
+        int(e["id"]): Player.from_bootstrap_element(e) for e in envelope["payload"]["elements"]
+    }
+
+    missing = [pid for pid in [*current, *out_ids, *in_ids] if pid not in all_players]
+    if missing:
+        typer.echo(f"Unknown player ID(s) in this snapshot: {missing}")
+        raise typer.Exit(code=1)
+
+    if set(out_ids) - set(current):
+        missing_out = set(out_ids) - set(current)
+        typer.echo(f"Cannot transfer out player(s) not in --current: {missing_out}")
+        raise typer.Exit(code=1)
+
+    resulting_ids = [pid for pid in current if pid not in out_ids] + list(in_ids)
+    resulting_squad = [all_players[pid] for pid in resulting_ids]
+
+    unavailable_statuses = ("i", "s", "u", "n")
+    unavailable_incoming = [
+        p.web_name
+        for p in resulting_squad
+        if p.id in in_ids and p.status.value in unavailable_statuses
+    ]
+    if unavailable_incoming:
+        typer.echo(f"Warning: incoming player(s) currently unavailable: {unavailable_incoming}")
+
+    violations = validate_squad(resulting_squad)
+    cost = calculate_transfer_cost(len(out_ids), free_transfers)
+
+    typer.echo(f"Transfers: {len(out_ids)} out, {len(in_ids)} in")
+    typer.echo(f"Cost: {cost} points ({free_transfers} free transfer(s) available)")
+    if violations:
+        typer.echo("Resulting squad is ILLEGAL:")
+        for v in violations:
+            typer.echo(f"  - {v}")
+        raise typer.Exit(code=1)
+    typer.echo("Resulting squad is LEGAL.")
+
+
 def _current_season_label(bootstrap: dict[str, object]) -> str:
     """Derive a 'YYYY_YY' season label from the bootstrap payload's static
     content URL, falling back to a generic label if the shape changes."""

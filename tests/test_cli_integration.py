@@ -234,3 +234,186 @@ def test_squad_enhanced_mode_uses_fixture_difficulty_when_available(
 
     assert result.exit_code == 0
     assert "fixture difficulty skipped" not in result.stdout
+
+
+# --- chip-status / chip-play ---------------------------------------------
+
+
+def test_chip_status_shows_all_four_chips(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["chip-status", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    assert "wildcard" in result.stdout
+    assert "free_hit" in result.stdout
+    assert "bench_boost" in result.stdout
+    assert "triple_captain" in result.stdout
+
+
+def test_chip_status_shows_wildcard_ineligible_in_gw1(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["chip-status", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    wildcard_line = next(line for line in result.stdout.splitlines() if "wildcard" in line)
+    assert "not eligible" in wildcard_line
+
+
+def test_chip_status_shows_bench_boost_eligible_in_gw1(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["chip-status", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    bb_line = next(line for line in result.stdout.splitlines() if "bench_boost" in line)
+    assert "available" in bb_line
+
+
+def test_chip_play_records_a_legal_chip(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["chip-play", "--chip", "bench_boost", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    assert "Recorded" in result.stdout
+    assert (tmp_path / "state" / "chips.json").exists()
+
+
+def test_chip_play_rejects_wildcard_in_gameweek_1(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["chip-play", "--chip", "wildcard", "--gameweek", "1"])
+
+    assert result.exit_code == 1
+    assert "Cannot play" in result.stdout
+
+
+def test_chip_play_rejects_playing_the_same_chip_twice(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    runner.invoke(app, ["chip-play", "--chip", "bench_boost", "--gameweek", "1"])
+
+    result = runner.invoke(app, ["chip-play", "--chip", "bench_boost", "--gameweek", "5"])
+
+    assert result.exit_code == 1
+    assert "already used" in result.stdout
+
+
+def test_chip_play_rejects_unknown_chip_name(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["chip-play", "--chip", "super_sub", "--gameweek", "1"])
+
+    assert result.exit_code == 1
+    assert "not a valid chip" in result.stdout
+
+
+# --- transfer-check --------------------------------------------------------
+
+
+def _current_squad_ids() -> list[str]:
+    """All 16 fake players except MID6 (id 16) - a legal 15-man squad
+    (2 GKP, 5 DEF, 5 MID, 3 FWD) drawn from _FAKE_BOOTSTRAP."""
+    return [str(i) for i in range(1, 16)]
+
+
+def test_transfer_check_valid_transfer_is_legal(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    args = ["transfer-check", "--gameweek", "1", "--free-transfers", "1"]
+    for pid in _current_squad_ids():
+        args += ["--current", pid]
+    args += ["--out", "8", "--in", "16"]  # swap MID1 (ep_next=0) for MID6
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0
+    assert "LEGAL" in result.stdout
+    assert "Cost: 0 points" in result.stdout  # 1 transfer, 1 free
+
+
+def test_transfer_check_reports_hit_cost_beyond_free_transfers(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    args = ["transfer-check", "--gameweek", "1", "--free-transfers", "0"]
+    for pid in _current_squad_ids():
+        args += ["--current", pid]
+    args += ["--out", "8", "--in", "16"]
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0
+    assert "Cost: 4 points" in result.stdout
+
+
+def test_transfer_check_rejects_transferring_out_a_player_not_in_current_squad(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    args = ["transfer-check", "--gameweek", "1"]
+    for pid in _current_squad_ids():
+        args += ["--current", pid]
+    args += ["--out", "16", "--in", "8"]  # 16 (MID6) isn't in --current
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1
+    assert "not in --current" in result.stdout
+
+
+def test_transfer_check_rejects_unknown_player_id(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    args = ["transfer-check", "--gameweek", "1"]
+    for pid in _current_squad_ids():
+        args += ["--current", pid]
+    args += ["--out", "8", "--in", "9999"]  # doesn't exist
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1
+    assert "Unknown player ID" in result.stdout
+
+
+def test_transfer_check_flags_a_squad_made_illegal_by_the_transfer(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    """Swap a GKP out for the extra MID (id 16), leaving only 1 GKP - an
+    illegal squad the resulting-squad validation must catch."""
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    args = ["transfer-check", "--gameweek", "1"]
+    for pid in _current_squad_ids():
+        args += ["--current", pid]
+    args += ["--out", "1", "--in", "16"]  # out: GK1, in: MID6 -> only 1 GKP left
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1
+    assert "ILLEGAL" in result.stdout
+
+
+def test_transfer_check_requires_matching_out_and_in_counts(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    args = ["transfer-check", "--gameweek", "1"]
+    for pid in _current_squad_ids():
+        args += ["--current", pid]
+    args += ["--out", "8", "--out", "9", "--in", "16"]  # 2 out, 1 in
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1
+    assert "same count" in result.stdout
