@@ -408,6 +408,86 @@ def transfer_check(
     typer.echo("Resulting squad is LEGAL.")
 
 
+@app.command("backtest")
+def backtest(
+    gameweek: int = typer.Option(..., help="Gameweek to evaluate against real results."),
+) -> None:
+    """Run a REAL historical evaluation for `gameweek`, using whatever
+    per-player results `fpl ingest-history` has actually captured.
+
+    This is NOT a demo with invented numbers — if no player has a real
+    recorded result for this gameweek yet, that's reported plainly as
+    zero cases, not papered over with a fake-looking metric. See
+    docs/architecture.md Sec 7/8/12 and the integration spec's explicit
+    instruction not to fabricate historical results.
+    """
+    from fpl_engine.data.contracts import parse_element_history
+    from fpl_engine.data.snapshot import read_latest_snapshot_any_season
+    from fpl_engine.domain.models import Player
+    from fpl_engine.models.backtest import run_backtest
+    from fpl_engine.models.baselines import FormWeightedBaseline, PositionAverageBaseline
+    from fpl_engine.models.data_pipeline import (
+        build_backtest_cases,
+        build_training_points_by_position,
+    )
+
+    settings = get_settings()
+    try:
+        bootstrap_envelope = read_latest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_bootstrap", gameweek=gameweek
+        )
+        history_envelope = read_latest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_element_history", gameweek=gameweek
+        )
+    except FileNotFoundError as exc:
+        typer.echo(f"Missing snapshot: {exc}")
+        typer.echo(
+            f"Need both `fpl ingest --gameweek {gameweek}` and "
+            f"`fpl ingest-history --gameweek {gameweek}` first."
+        )
+        raise typer.Exit(code=1) from None
+
+    elements = bootstrap_envelope["payload"]["elements"]
+    positions_by_player = {
+        int(e["id"]): Player.from_bootstrap_element(e).position for e in elements
+    }
+
+    player_histories = {}
+    for pid_str, raw_history in history_envelope["payload"]["player_histories"].items():
+        parsed = parse_element_history(int(pid_str), raw_history)
+        player_histories[int(pid_str)] = parsed.current_season
+
+    cases = build_backtest_cases(player_histories, positions_by_player, target_gameweek=gameweek)
+
+    if not cases:
+        typer.echo(f"REAL HISTORICAL EVALUATION — GW{gameweek}: 0 cases.")
+        typer.echo(
+            f"No player has a recorded result for GW{gameweek} yet — this gameweek "
+            f"hasn't been played, or `fpl ingest-history` was run before it finished. "
+            f"This is the correct, honest output when there's nothing real to evaluate "
+            f"yet; it is not an error."
+        )
+        return
+
+    training = build_training_points_by_position(
+        player_histories, positions_by_player, before_gameweek=gameweek
+    )
+    position_avg_model = PositionAverageBaseline.fit(training)
+    form_model = FormWeightedBaseline(position_avg_model)
+
+    position_avg_result = run_backtest(position_avg_model, cases)
+    form_result = run_backtest(form_model, cases)
+
+    typer.echo(f"REAL HISTORICAL EVALUATION — GW{gameweek}: {len(cases)} case(s)")
+    pos_avg_mae, pos_avg_rmse = position_avg_result.mae, position_avg_result.rmse
+    typer.echo(f"  PositionAverageBaseline:  MAE={pos_avg_mae}  RMSE={pos_avg_rmse}")
+    typer.echo(f"  FormWeightedBaseline:     MAE={form_result.mae}  RMSE={form_result.rmse}")
+    if form_result.mae < position_avg_result.mae:
+        typer.echo("  -> FormWeightedBaseline beat the naive baseline on this real data.")
+    else:
+        typer.echo("  -> FormWeightedBaseline did NOT beat the naive baseline on this real data.")
+
+
 def _current_season_label(bootstrap: dict[str, object]) -> str:
     """Derive a 'YYYY_YY' season label from the bootstrap payload's static
     content URL, falling back to a generic label if the shape changes."""

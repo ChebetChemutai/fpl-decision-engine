@@ -417,3 +417,67 @@ def test_transfer_check_requires_matching_out_and_in_counts(
 
     assert result.exit_code == 1
     assert "same count" in result.stdout
+
+
+# --- backtest ---------------------------------------------------------------
+
+
+def test_backtest_reports_zero_cases_honestly_when_no_real_results_exist(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    """The actual real-world state today: GW1 has been ingested (bootstrap)
+    but not yet played out, so element-history has no results for it.
+    Must report 0 cases plainly - not a fabricated or misleading metric.
+    """
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+    empty_histories = {str(i): {"history": [], "history_past": []} for i in range(1, 17)}
+    _write_snapshot(
+        tmp_path, "fpl_element_history", "2026_27", 1, {"player_histories": empty_histories}
+    )
+
+    result = runner.invoke(app, ["backtest", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    assert "0 cases" in result.stdout
+    assert "not an error" in result.stdout
+
+
+def test_backtest_fails_clearly_without_required_snapshots(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(app, ["backtest", "--gameweek", "1"])
+
+    assert result.exit_code == 1
+    assert "Missing snapshot" in result.stdout
+
+
+def test_backtest_runs_a_real_evaluation_when_results_exist(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    """Once real per-gameweek results exist (simulated here with a
+    deterministic, clearly-synthetic history - see test_data_pipeline.py's
+    module docstring for why synthetic fixtures are legitimate for this),
+    the command must actually run both baselines and report real numbers.
+    """
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    histories = {}
+    for i in range(1, 17):
+        # every player has a GW1 result, so GW1 is backtestable
+        histories[str(i)] = {
+            "history": [{"round": 1, "minutes": 90, "total_points": 4}],
+            "history_past": [],
+        }
+    _write_snapshot(tmp_path, "fpl_element_history", "2026_27", 1, {"player_histories": histories})
+
+    result = runner.invoke(app, ["backtest", "--gameweek", "1"])
+
+    assert result.exit_code == 0
+    assert "REAL HISTORICAL EVALUATION" in result.stdout
+    assert "16 case(s)" in result.stdout
+    assert "PositionAverageBaseline" in result.stdout
+    assert "FormWeightedBaseline" in result.stdout
