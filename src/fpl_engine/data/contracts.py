@@ -191,6 +191,19 @@ def parse_element_history(player_id: int, raw: dict[str, Any]) -> ParsedElementH
                     gameweek=int(raw_gw["round"]),
                     minutes=int(raw_gw["minutes"]),
                     total_points=int(raw_gw["total_points"]),
+                    goals_scored=int(raw_gw.get("goals_scored", 0)),
+                    assists=int(raw_gw.get("assists", 0)),
+                    clean_sheets=int(raw_gw.get("clean_sheets", 0)),
+                    goals_conceded=int(raw_gw.get("goals_conceded", 0)),
+                    own_goals=int(raw_gw.get("own_goals", 0)),
+                    penalties_saved=int(raw_gw.get("penalties_saved", 0)),
+                    penalties_missed=int(raw_gw.get("penalties_missed", 0)),
+                    yellow_cards=int(raw_gw.get("yellow_cards", 0)),
+                    red_cards=int(raw_gw.get("red_cards", 0)),
+                    saves=int(raw_gw.get("saves", 0)),
+                    bonus=int(raw_gw.get("bonus", 0)),
+                    defensive_contribution=int(raw_gw.get("defensive_contribution", 0)),
+                    starts=int(raw_gw.get("starts", 0)),
                 )
             )
         except (KeyError, ValueError, TypeError) as exc:

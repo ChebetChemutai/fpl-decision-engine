@@ -29,12 +29,35 @@ class GameweekPerformance(BaseModel):
     """One player's actual result for one completed gameweek.
 
     This is historical fact (what happened), not a prediction — the input
-    type to feature computation, never its output.
+    type to feature computation, never its output. Field set matches real
+    element-summary `history` entries (confirmed via a live fetch against
+    a played gameweek, 2026-08-25) — everything scoring_rules.MatchStats
+    needs to be reconstructed for component-level modeling, not just the
+    total_points/minutes that were sufficient for Phase 4/5's aggregate
+    features alone.
+
+    All the added fields default to 0 so existing callers/tests that only
+    ever cared about minutes/total_points (Phase 4/5) keep working
+    unchanged — this is additive, not a breaking change to the contract.
     """
 
     gameweek: int = Field(ge=1)
     minutes: int = Field(ge=0, le=120)
     total_points: int
+
+    goals_scored: int = Field(default=0, ge=0)
+    assists: int = Field(default=0, ge=0)
+    clean_sheets: int = Field(default=0, ge=0, description="0 or 1 in practice, per match.")
+    goals_conceded: int = Field(default=0, ge=0)
+    own_goals: int = Field(default=0, ge=0)
+    penalties_saved: int = Field(default=0, ge=0)
+    penalties_missed: int = Field(default=0, ge=0)
+    yellow_cards: int = Field(default=0, ge=0)
+    red_cards: int = Field(default=0, ge=0)
+    saves: int = Field(default=0, ge=0)
+    bonus: int = Field(default=0, ge=0, le=3)
+    defensive_contribution: int = Field(default=0, ge=0)
+    starts: int = Field(default=0, ge=0, le=1)
 
 
 def _rolling_average(values: list[int], window: int) -> float | None:
