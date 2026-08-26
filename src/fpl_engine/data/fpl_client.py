@@ -52,6 +52,51 @@ class FplClient:
         result: dict[str, Any] = response.json()
         return result
 
+    def fetch_manager_entry(self, manager_id: int) -> dict[str, Any]:
+        """GET /entry/{manager_id}/ — public manager profile (name, team
+        name, overall points/rank). Documented as unauthenticated/public
+        by multiple independent sources; not independently live-fetch-
+        verified in this codebase yet (see docs/manager-integration.md).
+        """
+        response = self._client.get(f"/entry/{manager_id}/")
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    def fetch_manager_history(self, manager_id: int) -> dict[str, Any]:
+        """GET /entry/{manager_id}/history/ — this-season per-gameweek
+        summary (points, rank, bank, value, transfers, chips used) plus
+        prior-season season-level totals.
+        """
+        response = self._client.get(f"/entry/{manager_id}/history/")
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    def fetch_manager_picks(self, manager_id: int, event_id: int) -> dict[str, Any]:
+        """GET /entry/{manager_id}/event/{event_id}/picks/ — that manager's
+        15-man squad for a specific gameweek.
+
+        Documentation sources disagree on whether this is public for the
+        CURRENT (not-yet-finished) gameweek or requires authentication —
+        genuinely unresolved in this codebase; see
+        docs/manager-integration.md. Past-gameweek picks are documented
+        as public. This method does not attempt to authenticate; a 401/403
+        here should be surfaced to the caller as-is, not silently retried
+        or worked around.
+        """
+        response = self._client.get(f"/entry/{manager_id}/event/{event_id}/picks/")
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    def fetch_manager_transfers(self, manager_id: int) -> list[dict[str, Any]]:
+        """GET /entry/{manager_id}/transfers/ — full transfer history."""
+        response = self._client.get(f"/entry/{manager_id}/transfers/")
+        response.raise_for_status()
+        result: list[dict[str, Any]] = response.json()
+        return result
+
     def close(self) -> None:
         self._client.close()
 

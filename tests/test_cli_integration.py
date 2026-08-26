@@ -481,3 +481,100 @@ def test_backtest_runs_a_real_evaluation_when_results_exist(
     assert "16 case(s)" in result.stdout
     assert "PositionAverageBaseline" in result.stdout
     assert "FormWeightedBaseline" in result.stdout
+
+
+# --- manager status/history/picks -------------------------------------------
+
+
+class _FakeManagerFplClient(_FakeFplClient):
+    """Extends the existing fake client with manager (entry) endpoints."""
+
+    def fetch_manager_entry(self, manager_id: int) -> dict[str, Any]:
+        return {
+            "id": manager_id,
+            "player_first_name": "Test",
+            "player_last_name": "Manager",
+            "name": "Test FC",
+            "summary_overall_points": 65,
+            "summary_overall_rank": 500000,
+            "current_event": 1,
+        }
+
+    def fetch_manager_history(self, manager_id: int) -> dict[str, Any]:
+        return {
+            "current": [
+                {
+                    "event": 1, "points": 65, "total_points": 65, "rank": 500000,
+                    "overall_rank": 500000, "bank": 5, "value": 1000,
+                    "event_transfers": 0, "event_transfers_cost": 0, "points_on_bench": 8,
+                }
+            ]
+        }
+
+    def fetch_manager_picks(self, manager_id: int, event_id: int) -> dict[str, Any]:
+        return {
+            "active_chip": None,
+            "picks": [
+                {
+                    "element": 1, "position": 1, "multiplier": 1,
+                    "is_captain": False, "is_vice_captain": False,
+                },
+                {
+                    "element": 4, "position": 2, "multiplier": 2,
+                    "is_captain": True, "is_vice_captain": False,
+                },
+            ],
+        }
+
+
+def test_manager_status_prints_profile(monkeypatch: Any) -> None:
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeManagerFplClient)
+
+    result = runner.invoke(app, ["manager", "status", "--manager-id", "331434"])
+
+    assert result.exit_code == 0
+    assert "Test FC" in result.stdout
+    assert "65" in result.stdout
+
+
+def test_manager_history_prints_gameweek_rows(monkeypatch: Any) -> None:
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeManagerFplClient)
+
+    result = runner.invoke(app, ["manager", "history", "--manager-id", "331434"])
+
+    assert result.exit_code == 0
+    assert "GW1" in result.stdout
+
+
+def test_manager_picks_prints_captain_marker(monkeypatch: Any) -> None:
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeManagerFplClient)
+
+    result = runner.invoke(
+        app, ["manager", "picks", "--manager-id", "331434", "--gameweek", "1"]
+    )
+
+    assert result.exit_code == 0
+    assert "(C)" in result.stdout
+
+
+def test_manager_picks_marks_bench_slots(monkeypatch: Any) -> None:
+    class _FakeWithBench(_FakeManagerFplClient):
+        def fetch_manager_picks(self, manager_id: int, event_id: int) -> dict[str, Any]:
+            return {
+                "active_chip": None,
+                "picks": [
+                    {
+                        "element": 1, "position": 12, "multiplier": 0,
+                        "is_captain": False, "is_vice_captain": False,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeWithBench)
+
+    result = runner.invoke(
+        app, ["manager", "picks", "--manager-id", "331434", "--gameweek", "1"]
+    )
+
+    assert result.exit_code == 0
+    assert "[bench]" in result.stdout

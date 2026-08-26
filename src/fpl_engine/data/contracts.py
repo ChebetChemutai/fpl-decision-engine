@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from fpl_engine.domain.manager import ManagerGameweekHistory, ManagerPick
 from fpl_engine.domain.models import Fixture, GameweekEvent, Player, SeasonSummary, Team
 from fpl_engine.features.temporal import GameweekPerformance
 
@@ -228,4 +229,62 @@ def parse_element_history(player_id: int, raw: dict[str, Any]) -> ParsedElementH
                 )
             )
 
+    return result
+
+
+@dataclass
+class ParsedManagerHistory:
+    gameweeks: list[ManagerGameweekHistory] = field(default_factory=list)
+    issues: list[ValidationIssue] = field(default_factory=list)
+
+    @property
+    def is_clean(self) -> bool:
+        return len(self.issues) == 0
+
+
+def parse_manager_history(manager_id: int, raw: dict[str, Any]) -> ParsedManagerHistory:
+    """Parse a raw /entry/{id}/history/ payload's `current` (this-season,
+    per-gameweek) entries. Best-effort: one malformed gameweek entry is
+    reported and skipped, same pattern as bootstrap/element-history parsing.
+    """
+    result = ParsedManagerHistory()
+    for raw_gw in raw.get("current", []):
+        try:
+            result.gameweeks.append(ManagerGameweekHistory.from_raw(raw_gw))
+        except (KeyError, ValueError, TypeError) as exc:
+            result.issues.append(
+                ValidationIssue(
+                    entity="manager_gameweek_history",
+                    identifier=f"manager={manager_id} event={raw_gw.get('event', '<unknown>')}",
+                    message=str(exc),
+                )
+            )
+    return result
+
+
+@dataclass
+class ParsedManagerPicks:
+    picks: list[ManagerPick] = field(default_factory=list)
+    active_chip: str | None = None
+    issues: list[ValidationIssue] = field(default_factory=list)
+
+    @property
+    def is_clean(self) -> bool:
+        return len(self.issues) == 0
+
+
+def parse_manager_picks(manager_id: int, gameweek: int, raw: dict[str, Any]) -> ParsedManagerPicks:
+    """Parse a raw /entry/{id}/event/{gw}/picks/ payload."""
+    result = ParsedManagerPicks(active_chip=raw.get("active_chip"))
+    for raw_pick in raw.get("picks", []):
+        try:
+            result.picks.append(ManagerPick.from_raw(raw_pick))
+        except (KeyError, ValueError, TypeError) as exc:
+            result.issues.append(
+                ValidationIssue(
+                    entity="manager_pick",
+                    identifier=f"manager={manager_id} gw={gameweek}",
+                    message=str(exc),
+                )
+            )
     return result

@@ -488,6 +488,81 @@ def backtest(
         typer.echo("  -> FormWeightedBaseline did NOT beat the naive baseline on this real data.")
 
 
+manager_app = typer.Typer(
+    help="Read-only manager (entry) account commands. See docs/manager-integration.md."
+)
+app.add_typer(manager_app, name="manager")
+
+
+@manager_app.command("status")
+def manager_status(manager_id: int = typer.Option(..., help="Your FPL manager/entry ID.")) -> None:
+    """Print public profile info for a manager. Read-only — never writes
+    to your FPL account (architecture.md Sec 29). No authentication is
+    attempted; if this fails with an auth error, see
+    docs/manager-integration.md for what's actually confirmed public.
+    """
+    from fpl_engine.data.fpl_client import FplClient
+    from fpl_engine.domain.manager import ManagerProfile
+
+    with FplClient() as client:
+        raw = client.fetch_manager_entry(manager_id)
+    profile = ManagerProfile.from_raw(raw)
+
+    typer.echo(f"{profile.player_first_name} {profile.player_last_name} — {profile.team_name}")
+    typer.echo(f"Overall points: {profile.summary_overall_points}")
+    typer.echo(f"Overall rank:   {profile.summary_overall_rank}")
+    typer.echo(f"Current GW:     {profile.current_event}")
+
+
+@manager_app.command("history")
+def manager_history(manager_id: int = typer.Option(..., help="Your FPL manager/entry ID.")) -> None:
+    """Print this-season gameweek-by-gameweek history for a manager."""
+    from fpl_engine.data.contracts import parse_manager_history
+    from fpl_engine.data.fpl_client import FplClient
+
+    with FplClient() as client:
+        raw = client.fetch_manager_history(manager_id)
+    parsed = parse_manager_history(manager_id, raw)
+
+    if not parsed.is_clean:
+        typer.echo(f"Warning: {len(parsed.issues)} gameweek(s) could not be parsed.")
+    for gw in parsed.gameweeks:
+        typer.echo(
+            f"GW{gw.event:<3} pts={gw.points:<4} total={gw.total_points:<5} "
+            f"rank={gw.rank} overall_rank={gw.overall_rank} "
+            f"bank={gw.bank / 10:.1f}m value={gw.value / 10:.1f}m "
+            f"transfers={gw.event_transfers} (cost {gw.event_transfers_cost})"
+        )
+
+
+@manager_app.command("picks")
+def manager_picks(
+    manager_id: int = typer.Option(..., help="Your FPL manager/entry ID."),
+    gameweek: int = typer.Option(..., help="Gameweek to fetch picks for."),
+) -> None:
+    """Print a manager's squad picks for a gameweek.
+
+    Whether this works for the CURRENT (unfinished) gameweek without
+    authentication is genuinely unconfirmed — see
+    docs/manager-integration.md. Past-gameweek picks are documented as
+    public. An auth error here is surfaced as-is, not worked around.
+    """
+    from fpl_engine.data.contracts import parse_manager_picks
+    from fpl_engine.data.fpl_client import FplClient
+
+    with FplClient() as client:
+        raw = client.fetch_manager_picks(manager_id, gameweek)
+    parsed = parse_manager_picks(manager_id, gameweek, raw)
+
+    if not parsed.is_clean:
+        typer.echo(f"Warning: {len(parsed.issues)} pick(s) could not be parsed.")
+    typer.echo(f"Active chip: {parsed.active_chip or 'none'}")
+    for pick in sorted(parsed.picks, key=lambda p: p.position):
+        marker = " (C)" if pick.is_captain else " (VC)" if pick.is_vice_captain else ""
+        bench_note = " [bench]" if pick.position > 11 else ""
+        typer.echo(f"  slot {pick.position:>2}: element {pick.element}{marker}{bench_note}")
+
+
 def _current_season_label(bootstrap: dict[str, object]) -> str:
     """Derive a 'YYYY_YY' season label from the bootstrap payload's static
     content URL, falling back to a generic label if the shape changes."""
