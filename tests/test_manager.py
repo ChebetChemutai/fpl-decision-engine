@@ -91,7 +91,7 @@ def test_parse_manager_history_skips_malformed_entries() -> None:
 def test_manager_pick_parses_documented_shape() -> None:
     raw = {
         "element": 4, "position": 3, "multiplier": 1,
-        "is_captain": False, "is_vice_captain": False,
+        "is_captain": False, "is_vice_captain": False, "element_type": 2,
     }
 
     pick = ManagerPick.from_raw(raw)
@@ -99,6 +99,7 @@ def test_manager_pick_parses_documented_shape() -> None:
     assert pick.element == 4
     assert pick.position == 3
     assert not pick.is_captain
+    assert pick.element_type == 2
 
 
 def test_parse_manager_picks_extracts_active_chip_and_picks() -> None:
@@ -107,11 +108,11 @@ def test_parse_manager_picks_extracts_active_chip_and_picks() -> None:
         "picks": [
             {
                 "element": 1, "position": 1, "multiplier": 1,
-                "is_captain": False, "is_vice_captain": False,
+                "is_captain": False, "is_vice_captain": False, "element_type": 1,
             },
             {
                 "element": 4, "position": 2, "multiplier": 2,
-                "is_captain": True, "is_vice_captain": False,
+                "is_captain": True, "is_vice_captain": False, "element_type": 2,
             },
         ],
     }
@@ -139,3 +140,53 @@ def test_parse_manager_picks_skips_malformed_pick() -> None:
 
     assert not parsed.is_clean
     assert parsed.picks == []
+
+
+def test_parses_real_gw1_picks_response_captured_2026_08_26() -> None:
+    """Real, live-captured response - manager 6313636, GW1, fetched via
+    `curl https://fantasy.premierleague.com/api/entry/6313636/event/1/picks/`
+    on 2026-08-26 and pasted verbatim (trimmed to a few picks for
+    brevity). This is the strongest test in this file: not documentation,
+    not a plausible guess - an actual real response, byte-for-byte.
+    """
+    raw = {
+        "active_chip": None,
+        "automatic_subs": [],
+        "entry_history": {
+            "event": 1, "points": 59, "total_points": 59, "rank": 1987559,
+            "rank_sort": 2138852, "overall_rank": 1987556, "percentile_rank": 25,
+            "overall_rank_percentage": "22", "bank": 0, "value": 1000,
+            "event_transfers": 0, "event_transfers_cost": 0, "points_on_bench": 10,
+        },
+        "picks": [
+            {
+                "element": 1, "position": 1, "multiplier": 1,
+                "is_captain": False, "is_vice_captain": True, "element_type": 1,
+            },
+            {
+                "element": 165, "position": 10, "multiplier": 2,
+                "is_captain": True, "is_vice_captain": False, "element_type": 4,
+            },
+            {
+                "element": 226, "position": 12, "multiplier": 0,
+                "is_captain": False, "is_vice_captain": False, "element_type": 1,
+            },
+        ],
+    }
+
+    parsed = parse_manager_picks(manager_id=6313636, gameweek=1, raw=raw)
+    history = parse_manager_history(manager_id=6313636, raw={"current": [raw["entry_history"]]})
+
+    assert parsed.is_clean
+    assert parsed.active_chip is None
+    assert len(parsed.picks) == 3
+
+    vice_captain = next(p for p in parsed.picks if p.is_vice_captain)
+    assert vice_captain.element == 1
+    captain = next(p for p in parsed.picks if p.is_captain)
+    assert captain.element == 165
+    assert captain.multiplier == 2
+
+    assert history.is_clean
+    assert history.gameweeks[0].points == 59
+    assert history.gameweeks[0].value == 1000  # £100.0m

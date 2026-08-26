@@ -1,11 +1,16 @@
 # Phases 1–5 Consolidation Audit — Final Report
 
-**Verdict: NOT declaring "PHASES 1–5 COMPLETE AND VERIFIED — READY FOR
-PHASE 6" yet.** Real progress was made this session, but two items in
-the spec's own acceptance criteria are genuinely incomplete (manager
-picks field confirmation, league data, GW1-actual-vs-baseline
-comparison) — see Section 25 below. This report says so plainly rather
-than declaring victory to close the loop.
+**Update 2026-08-26**: the manager-picks field-shape question (the
+single largest open item below) is now resolved against real data —
+see Section 25. Still not declaring full "READY FOR PHASE 6" in this
+update, since league data and the GW1-actual-vs-baseline comparison
+remain unbuilt, but the foundation is materially stronger than the
+original version of this report.
+
+**Original verdict, for context: NOT declaring "PHASES 1–5 COMPLETE
+AND VERIFIED — READY FOR PHASE 6" yet.** Real progress was made this
+session, but items in the spec's own acceptance criteria were
+genuinely incomplete — see Section 25 below.
 
 ---
 
@@ -110,11 +115,16 @@ mypy --strict: Success: no issues found in 30 source files
 
 ## 25. Known limitations (unresolved from the spec's acceptance criteria)
 
-- **Manager `picks` field shapes are unconfirmed** — the single most important open item. Needs one real live call against a real manager ID.
+- ~~Manager `picks` field shapes are unconfirmed~~ **RESOLVED 2026-08-26**:
+  confirmed against a real account (manager 6313636, GW1). Fully public,
+  no authentication needed. `ManagerPick` extended with the one real
+  field it was missing (`element_type`); confirmed `selling_price`/
+  `purchase_price` genuinely do not appear in this endpoint.
 - **League/classic-standings endpoints are not implemented** — documented to exist, deliberately deferred per the spec's own "don't build competitor analytics before basic manager integration works" instruction (Section 25).
 - **Official 2026/27 Price Change Predictor**: confirmed to exist and be real (multiple sources), and its likely underlying data (`price_change_percent`, `price_change_projections`) was already confirmed present in a live bootstrap-static fetch two sessions ago — but no dedicated parsing/exposure of these fields was built this session; they currently pass through unused in the raw snapshot.
 - **Manager data does not reach the recommendation layer** — by design, per spec Sec 13's sequencing, not an oversight.
-- **GW1 actual-vs-baseline comparison** — blocked on a real manager ID, not yet run.
+- **GW1 actual-vs-baseline comparison** — now unblocked (a real manager ID exists), but not yet run — the comparison logic itself (squad vs squad, points vs points) hasn't been built.
+- **Selling price can't be computed for a real squad yet** — the rule is verified, but applying it needs `purchase_price` from `/entry/{id}/transfers/`, which is fetched but not parsed.
 
 ## 26. Components deliberately deferred to Phase 6+
 
@@ -153,9 +163,9 @@ fpl backtest --gameweek <N>
 | Temporal features / leakage guard | ✅ | ✅ | ✅ | ✅ (real GW1 scoring validation, 2 sessions ago) |
 | Backtesting | ✅ | ✅ | ✅ | Ready, but 0 real cases exist yet |
 | Selling-price rule | ✅ | ✅ | — (not called by anything yet) | Rule-verified via 6 sources, not API-verified |
-| Manager account layer | ✅ | ✅ | ✅ (mocked) | ❌ **not yet — real field shapes unconfirmed** |
+| Manager account layer | ✅ | ✅ | ✅ (mocked + 1 real-data regression test) | ✅ **CONFIRMED 2026-08-26 — real account, manager 6313636, GW1** |
 
-This is an honest "not finished" on the manager layer specifically —
-that's the one piece of this session's work I would not stake real
-money on being field-name-correct until it's run against a real
-account once.
+This is now a genuinely closed loop: the manager layer moved from
+"documentation-based, unconfirmed" to "verified against a real,
+live-captured response" within the same session, by asking for and
+using real evidence instead of proceeding on assumption.

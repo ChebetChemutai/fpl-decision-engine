@@ -43,7 +43,13 @@ class ManagerProfile(BaseModel):
 
 class ManagerGameweekHistory(BaseModel):
     """One entry from GET /entry/{id}/history/ -> `current` (this season,
-    per gameweek)."""
+    per gameweek). Core fields confirmed against a real live response
+    (2026-08-26, manager 6313636, GW1) via /entry/{id}/event/{gw}/picks/'s
+    `entry_history` block, which shares this shape. `rank_sort`,
+    `percentile_rank`, `overall_rank_percentage` are also real and
+    present but not yet captured here — deferred, not missed; add them
+    if a future feature needs them rather than carrying unused fields now.
+    """
 
     event: int
     points: int
@@ -75,11 +81,14 @@ class ManagerGameweekHistory(BaseModel):
 class ManagerPick(BaseModel):
     """One squad slot from GET /entry/{id}/event/{gw}/picks/ -> `picks`.
 
-    Deliberately does NOT include selling_price/purchase_price — their
-    presence in this endpoint's real response was not independently
-    confirmed this session (see module docstring). Add them once
-    confirmed against a real response rather than guessing the field
-    names now.
+    Field set CONFIRMED against a real, live response (2026-08-26,
+    manager 6313636, GW1) — not documentation-based. Confirmed present:
+    element, position, multiplier, is_captain, is_vice_captain,
+    element_type. Confirmed ABSENT from this response: selling_price,
+    purchase_price — do not add them; they are not part of this
+    endpoint's real shape, at least not for a just-played gameweek.
+    `automatic_subs` (a sibling key in the same response, not part of
+    `picks`) exists but is not parsed here yet — deferred, not missed.
     """
 
     element: int  # player id, joins to bootstrap-static elements[].id
@@ -87,6 +96,7 @@ class ManagerPick(BaseModel):
     multiplier: int  # 0 (benched), 1 (starts), 2/3 (captain/triple captain)
     is_captain: bool
     is_vice_captain: bool
+    element_type: int  # 1-4, matches domain.models.Position values
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> ManagerPick:
@@ -96,4 +106,5 @@ class ManagerPick(BaseModel):
             multiplier=int(raw["multiplier"]),
             is_captain=bool(raw["is_captain"]),
             is_vice_captain=bool(raw["is_vice_captain"]),
+            element_type=int(raw["element_type"]),
         )

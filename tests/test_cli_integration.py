@@ -517,11 +517,11 @@ class _FakeManagerFplClient(_FakeFplClient):
             "picks": [
                 {
                     "element": 1, "position": 1, "multiplier": 1,
-                    "is_captain": False, "is_vice_captain": False,
+                    "is_captain": False, "is_vice_captain": False, "element_type": 1,
                 },
                 {
                     "element": 4, "position": 2, "multiplier": 2,
-                    "is_captain": True, "is_vice_captain": False,
+                    "is_captain": True, "is_vice_captain": False, "element_type": 2,
                 },
             ],
         }
@@ -565,7 +565,7 @@ def test_manager_picks_marks_bench_slots(monkeypatch: Any) -> None:
                 "picks": [
                     {
                         "element": 1, "position": 12, "multiplier": 0,
-                        "is_captain": False, "is_vice_captain": False,
+                        "is_captain": False, "is_vice_captain": False, "element_type": 1,
                     }
                 ],
             }
