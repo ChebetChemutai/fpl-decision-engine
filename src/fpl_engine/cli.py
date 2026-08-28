@@ -563,6 +563,100 @@ def manager_picks(
         typer.echo(f"  slot {pick.position:>2}: element {pick.element}{marker}{bench_note}")
 
 
+@manager_app.command("evaluate")
+def manager_evaluate(
+    manager_id: int = typer.Option(..., help="Your FPL manager/entry ID."),
+    gameweek: int = typer.Option(..., help="Gameweek to evaluate."),
+) -> None:
+    """Compare your actual submitted squad's real points to what the
+    baseline model would have recommended, both scored against real
+    results.
+
+    The baseline is reconstructed from the EARLIEST ingested bootstrap
+    snapshot for this gameweek — the one closest to what would have
+    been recommended before the deadline — never a fresh fetch, since
+    ep_next changes over time and a fresh fetch today would not
+    represent what the tool actually said back then.
+
+    Does not model automatic substitutions on either side — see
+    models/evaluation.py's module docstring.
+    """
+    from fpl_engine.baseline.squad_builder import build_squad
+    from fpl_engine.data.contracts import parse_element_history, parse_manager_picks
+    from fpl_engine.data.fpl_client import FplClient
+    from fpl_engine.data.snapshot import (
+        read_earliest_snapshot_any_season,
+        read_latest_snapshot_any_season,
+    )
+    from fpl_engine.domain.models import Player
+    from fpl_engine.models.evaluation import (
+        SquadPick,
+        evaluate_squad_points,
+        points_by_player_from_element_history,
+        squad_to_picks,
+    )
+
+    settings = get_settings()
+    try:
+        bootstrap_envelope = read_earliest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_bootstrap", gameweek=gameweek
+        )
+    except FileNotFoundError:
+        typer.echo(
+            f"No bootstrap snapshot for GW{gameweek}. "
+            f"Run `fpl ingest --gameweek {gameweek}` first."
+        )
+        raise typer.Exit(code=1) from None
+
+    try:
+        history_envelope = read_latest_snapshot_any_season(
+            raw_dir=settings.raw_dir, source="fpl_element_history", gameweek=gameweek
+        )
+    except FileNotFoundError:
+        typer.echo(
+            f"No element-history snapshot for GW{gameweek}. "
+            f"Run `fpl ingest-history --gameweek {gameweek}` first."
+        )
+        raise typer.Exit(code=1) from None
+
+    players = [Player.from_bootstrap_element(e) for e in bootstrap_envelope["payload"]["elements"]]
+    baseline_squad = build_squad(players)
+
+    player_histories = {}
+    for pid_str, raw_history in history_envelope["payload"]["player_histories"].items():
+        parsed_history = parse_element_history(int(pid_str), raw_history)
+        player_histories[int(pid_str)] = parsed_history.current_season
+    points_by_player = points_by_player_from_element_history(player_histories, gameweek)
+
+    with FplClient() as client:
+        raw_picks = client.fetch_manager_picks(manager_id, gameweek)
+    parsed_picks = parse_manager_picks(manager_id, gameweek, raw_picks)
+    actual_picks = [
+        SquadPick(player_id=p.element, multiplier=p.multiplier) for p in parsed_picks.picks
+    ]
+
+    actual_points = evaluate_squad_points(actual_picks, points_by_player)
+    baseline_points = evaluate_squad_points(squad_to_picks(baseline_squad), points_by_player)
+
+    typer.echo(f"GW{gameweek} evaluation — manager {manager_id}")
+    typer.echo(f"  Actual submitted squad: {actual_points} points")
+    typer.echo(
+        f"  Baseline model squad:   {baseline_points} points "
+        f"(reconstructed from snapshot captured {bootstrap_envelope['captured_at']})"
+    )
+    diff = actual_points - baseline_points
+    if diff > 0:
+        typer.echo(f"  You beat the baseline by {diff} points.")
+    elif diff < 0:
+        typer.echo(f"  The baseline would have beaten you by {-diff} points.")
+    else:
+        typer.echo("  Tied.")
+    typer.echo(
+        "  Note: automatic substitutions are not modeled on either side — "
+        "treat a close result with caution if a starter didn't play."
+    )
+
+
 def _current_season_label(bootstrap: dict[str, object]) -> str:
     """Derive a 'YYYY_YY' season label from the bootstrap payload's static
     content URL, falling back to a generic label if the shape changes."""

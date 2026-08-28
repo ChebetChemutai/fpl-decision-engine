@@ -578,3 +578,77 @@ def test_manager_picks_marks_bench_slots(monkeypatch: Any) -> None:
 
     assert result.exit_code == 0
     assert "[bench]" in result.stdout
+
+
+# --- manager evaluate --------------------------------------------------------
+
+
+def test_manager_evaluate_compares_actual_vs_baseline(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    # Real per-GW results for every fake player, keyed to build a
+    # deterministic, checkable evaluation.
+    histories = {}
+    for i in range(1, 17):
+        histories[str(i)] = {
+            "history": [{"round": 1, "minutes": 90, "total_points": 5}],
+            "history_past": [],
+        }
+    _write_snapshot(tmp_path, "fpl_element_history", "2026_27", 1, {"player_histories": histories})
+
+    class _FakeEvalClient(_FakeManagerFplClient):
+        def fetch_manager_picks(self, manager_id: int, event_id: int) -> dict[str, Any]:
+            # A tiny (not full 15-player) actual squad is fine for this
+            # test - evaluate_squad_points sums whatever picks it's given.
+            return {
+                "active_chip": None,
+                "picks": [
+                    {
+                        "element": 1, "position": 1, "multiplier": 1,
+                        "is_captain": False, "is_vice_captain": False, "element_type": 1,
+                    },
+                    {
+                        "element": 8, "position": 2, "multiplier": 2,
+                        "is_captain": True, "is_vice_captain": False, "element_type": 3,
+                    },
+                ],
+            }
+
+    monkeypatch.setattr("fpl_engine.data.fpl_client.FplClient", _FakeEvalClient)
+
+    result = runner.invoke(
+        app, ["manager", "evaluate", "--manager-id", "331434", "--gameweek", "1"]
+    )
+
+    assert result.exit_code == 0
+    assert "Actual submitted squad: 15 points" in result.stdout  # 5*1 + 5*2
+    assert "Baseline model squad:" in result.stdout
+    assert "automatic substitutions are not modeled" in result.stdout
+
+
+def test_manager_evaluate_fails_clearly_without_bootstrap_snapshot(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+
+    result = runner.invoke(
+        app, ["manager", "evaluate", "--manager-id", "331434", "--gameweek", "1"]
+    )
+
+    assert result.exit_code == 1
+    assert "fpl ingest --gameweek 1" in result.stdout
+
+
+def test_manager_evaluate_fails_clearly_without_history_snapshot(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FPL_DATA_DIR", str(tmp_path))
+    _write_snapshot(tmp_path, "fpl_bootstrap", "2026_27", 1, _FAKE_BOOTSTRAP)
+
+    result = runner.invoke(
+        app, ["manager", "evaluate", "--manager-id", "331434", "--gameweek", "1"]
+    )
+
+    assert result.exit_code == 1
+    assert "fpl ingest-history --gameweek 1" in result.stdout

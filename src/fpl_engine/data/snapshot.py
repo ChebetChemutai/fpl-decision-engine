@@ -70,3 +70,26 @@ def read_latest_snapshot_any_season(*, raw_dir: Path, source: str, gameweek: int
         )
     data: dict[str, Any] = json.loads(candidates[-1].read_text(encoding="utf-8"))
     return data
+
+
+def read_earliest_snapshot_any_season(
+    *, raw_dir: Path, source: str, gameweek: int
+) -> dict[str, Any]:
+    """Read the EARLIEST snapshot for a source/GW, searching across all
+    season directories.
+
+    Use this instead of read_latest_snapshot_any_season when
+    reconstructing "what would have been recommended before the
+    deadline" — the first snapshot captured for a gameweek is the one
+    closest to what an actual pre-deadline recommendation would have
+    used. A later re-ingest of the same source/gameweek reflects
+    updated/post-deadline data (ep_next changes over time), which would
+    misrepresent what the tool actually said back then.
+    """
+    candidates = sorted((raw_dir / source).glob(f"*/{gameweek}/*.json"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"no snapshots found for source={source!r} gameweek={gameweek} under {raw_dir}"
+        )
+    data: dict[str, Any] = json.loads(candidates[0].read_text(encoding="utf-8"))
+    return data
